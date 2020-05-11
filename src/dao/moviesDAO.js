@@ -46,27 +46,30 @@ export default class MoviesDAO {
   static async getMoviesByCountry(countries) {
     /**
     Ticket: Projection
-
     Write a query that matches movies with the countries in the "countries"
     list, but only returns the title and _id of each movie.
-
     Remember that in MongoDB, the $in operator can be used with a list to
     match one or more values of a specific field.
     */
 
     let cursor
+    // const searchCountries = Array.isArray(countries)
+    //   ? countries
+    //   : countries.split(", ")
+    const query = { countries: { $in: countries } }
+    const project = { title: 1 }
+
     try {
       // TODO Ticket: Projection
       // Find movies matching the "countries" list, but only return the title
       // and _id. Do not put a limit in your own implementation, the limit
       // here is only included to avoid sending 46000 documents down the
       // wire.
-      cursor = await movies.find().limit(1)
+      cursor = await movies.find(query).project(project)
     } catch (e) {
       console.error(`Unable to issue find command, ${e}`)
       return []
     }
-
     return cursor.toArray()
   }
 
@@ -107,7 +110,6 @@ export default class MoviesDAO {
   static genreSearchQuery(genre) {
     /**
     Ticket: Text and Subfield Search
-
     Given an array of one or more genres, construct a query that searches
     MongoDB for movies with that genre.
     */
@@ -116,7 +118,7 @@ export default class MoviesDAO {
 
     // TODO Ticket: Text and Subfield Search
     // Construct a query that will search for the chosen genre.
-    const query = {}
+    const query = { genres: { $in: searchGenre } }
     const project = {}
     const sort = DEFAULT_SORT
 
@@ -182,11 +184,9 @@ export default class MoviesDAO {
 
     /**
     Ticket: Faceted Search
-
     Please append the skipStage, limitStage, and facetStage to the queryPipeline
     (in that order). You can accomplish this by adding the stages directly to
     the queryPipeline.
-
     The queryPipeline is a Javascript array, so you can use push() or concat()
     to complete this task, but you might have to do something about `const`.
     */
@@ -194,6 +194,9 @@ export default class MoviesDAO {
     const queryPipeline = [
       matchStage,
       sortStage,
+      skipStage,
+      limitStage,
+      facetStage,
       // TODO Ticket: Faceted Search
       // Add the stages to queryPipeline in the correct order.
     ]
@@ -243,6 +246,8 @@ export default class MoviesDAO {
         .find(query)
         .project(project)
         .sort(sort)
+        .limit(moviesPerPage)
+        .skip(page * moviesPerPage)
     } catch (e) {
       console.error(`Unable to issue find command, ${e}`)
       return { moviesList: [], totalNumMovies: 0 }
@@ -250,10 +255,8 @@ export default class MoviesDAO {
 
     /**
     Ticket: Paging
-
     Before this method returns back to the API, use the "moviesPerPage" and
     "page" arguments to decide the movies to display.
-
     Paging can be implemented by using the skip() and limit() cursor methods.
     */
 
@@ -283,10 +286,8 @@ export default class MoviesDAO {
     try {
       /**
       Ticket: Get Comments
-
       Given a movie ID, build an Aggregation Pipeline to retrieve the comments
       matching that movie's ID.
-
       The $match stage is already completed. You will need to add a $lookup
       stage that searches the `comments` collection for the correct comments.
       */
@@ -296,23 +297,36 @@ export default class MoviesDAO {
       const pipeline = [
         {
           $match: {
-            _id: ObjectId(id)
-          }
-        }
+            _id: ObjectId(id),
+          },
+        },
+        {
+          $lookup: {
+            from: "comments",
+            let: { id: "$_id" },
+            pipeline: [
+              { $match: { $expr: { $eq: ["$movie_id", "$$id"] } } },
+              { $sort: { date: -1 } },
+            ],
+            as: "comments",
+          },
+        },
       ]
       return await movies.aggregate(pipeline).next()
     } catch (e) {
       /**
       Ticket: Error Handling
-
       Handle the error that occurs when an invalid ID is passed to this method.
       When this specific error is thrown, the method should return `null`.
       */
 
       // TODO Ticket: Error Handling
       // Catch the InvalidId error by string matching, and then handle it.
+      if (String(e).startsWith("MongoError: E11000 duplicate key error")) {
+        return null
+      }
       console.error(`Something went wrong in getMovieByID: ${e}`)
-      throw e
+      return null
     }
   }
 }
